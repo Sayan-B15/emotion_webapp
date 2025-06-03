@@ -3,6 +3,8 @@ const overlay = document.getElementById('overlay');
 const ctx = overlay.getContext('2d');
 const emotionText = document.getElementById('emotion');
 
+let isProcessing = false; // prevent overlapping calls
+
 // Start webcam
 navigator.mediaDevices.getUserMedia({ video: true })
 .then(stream => {
@@ -12,9 +14,16 @@ navigator.mediaDevices.getUserMedia({ video: true })
     console.error("Error accessing webcam: ", err);
 });
 
+// Set canvas size same as video
+video.addEventListener('loadedmetadata', () => {
+    overlay.width = video.videoWidth;
+    overlay.height = video.videoHeight;
+});
+
 // Send frame to backend every 500ms
 setInterval(() => {
-    if (video.readyState !== video.HAVE_ENOUGH_DATA) return;
+    if (isProcessing || video.readyState !== video.HAVE_ENOUGH_DATA) return;
+    isProcessing = true;
 
     const canvas = document.createElement('canvas');
     canvas.width = video.videoWidth;
@@ -23,6 +32,8 @@ setInterval(() => {
     context.drawImage(video, 0, 0, canvas.width, canvas.height);
     const dataURL = canvas.toDataURL('image/jpeg');
 
+    emotionText.textContent = 'Detecting...'; // Optional UI feedback
+
     fetch('/predict', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -30,18 +41,15 @@ setInterval(() => {
     })
     .then(res => res.json())
     .then(data => {
-        emotionText.textContent = data.emotion;
+        isProcessing = false;
+        emotionText.textContent = `Emotion: ${data.emotion}`;
 
         // Clear previous drawings
         ctx.clearRect(0, 0, overlay.width, overlay.height);
 
-        // Draw the green border around video (already done in CSS)
-
         if (data.face) {
-            // Make square bigger by padding
             const padding = 20;
 
-            // Scale coordinates from video to canvas overlay
             let scaleX = overlay.width / video.videoWidth;
             let scaleY = overlay.height / video.videoHeight;
 
@@ -50,7 +58,6 @@ setInterval(() => {
             let w = (data.face.w + padding * 2) * scaleX;
             let h = (data.face.h + padding * 2) * scaleY;
 
-            // Keep coordinates positive (optional)
             x = x < 0 ? 0 : x;
             y = y < 0 ? 0 : y;
 
@@ -62,6 +69,7 @@ setInterval(() => {
         }
     })
     .catch(err => {
+        isProcessing = false;
         console.error("Prediction error: ", err);
         emotionText.textContent = 'Error';
     });
